@@ -106,7 +106,7 @@ The files contained in the layer/<cach-id> directory are:
 - cache-id: containing the random `cache-id` for the layer
 - diff: containing the original layrer's sha256, in the format: `sha256:<sha256>`
 - parent: containing the parent's `chain-id` (`sha256("<parent_chain_id> <self_diff_id>")`)
-- size: ?? I think we can ignore
+- size: Size of the layer.tar file in bytes
 - tar-split.json.gz (just an optimization, we can ignore)
 
 Example:
