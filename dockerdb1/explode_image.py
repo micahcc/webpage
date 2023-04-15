@@ -8,7 +8,6 @@ import tarfile
 import argparse
 import sys
 import base64
-from pprint import pprint
 import random
 import string
 
@@ -64,7 +63,6 @@ def main():
     if os.path.exists(args.outdir):
         print(f"{args.outdir} exists!")
         return 1
-    print(args)
 
     os.makedirs(os.path.join(args.outdir, "image/overlay2/imagedb/content/sha256"))
 
@@ -91,7 +89,6 @@ def main():
                 layer_tar = os.path.join(tmpdir, d, "layer.tar")
                 layer_sha = compute_sha256(layer_tar)
                 diff_id = f"sha256:{layer_sha}"
-                print(f"Tar of {layer_tar} is {diff_id}")
                 packed_layer_id_to_diff_id[d] = diff_id
                 link_id = _random_string(26)
                 diff_id_to_link_id[diff_id] = link_id
@@ -105,9 +102,6 @@ def main():
                 with open(os.path.join(tmpdir, d, "json")) as f:
                     layer_config = json.load(f)
                 diff_id_to_layer_config[packed_layer_id_to_diff_id[d]] = layer_config
-
-            pprint(packed_layer_id_to_diff_id)
-            pprint(diff_id_to_layer_config.keys())
 
             # create chain_id for each layer
             # and create lookup for parent diff ids
@@ -132,8 +126,6 @@ def main():
                     diff_id_to_layer_config,
                     d,
                 )
-
-            pprint(diff_id_to_chain_id)
 
             image_id = manifest[0]["Config"].split(".")[0]
             image_config_path = os.path.join(
@@ -227,7 +219,7 @@ def main():
                 tar = tarfile.open(layer_tar)
                 tar.extractall(os.path.join(overlay_dir, "diff"))
                 tar.close()
-                os.makedirs(os.path.join(overlay_dir, "work/work"))
+                # os.makedirs(os.path.join(overlay_dir, "work/work"))
 
                 old = os.getcwd()
                 os.chdir(link_dir)
