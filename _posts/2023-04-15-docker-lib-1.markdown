@@ -293,17 +293,24 @@ So you have 3 layers with `LINK_ID`'s of `AA`, `BB`, `CC`, and `CACHE_ID`'s of
 
 ## The Code
 
-Ok that was a lot of explanation, so now [here](explode_image.py) is the code.
+Ok that was a lot of explanation, so now here is the code:
+
+{% highlight python %}
+{% include explode_image.py %}
+{% endhighlight %}
 
 To test it, we can resume the bash work above.
 
 ```
+
 # destroy docker state
+
 sudo mv /var/lib/docker/ /var/lib/docker.backup
 ./explode_image.py -i image.tar.gz -o /tmp/docker
 sudo mv /tmp/docker /var/lib/docker
 sudo systemctl restart docker
 docker images
+
 ```
 
 {% comment %}
