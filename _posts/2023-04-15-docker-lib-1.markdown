@@ -245,6 +245,20 @@ an image? Let go through the files:
 The original `<IMAGE_ID>.json` in the image tar needs to be copied to
 `/var/lib/docker/image/overlay2/imagedb/content/sha256/<IMAGE_ID>`
 
+To ensure you image is properly tagged, you need to update
+`var/lib/docker/image/overlay2/repositories.json`
+so that we have a tag. So if `manifest.json` contains `RepoTags: ["myimage:latest"]` then you would add:
+
+```diff
+ {
+   "Repositories": {
++     "myimage": {
++       "myimage:latest": "sha256:<IMAGE_ID>"
++     }
+   }
+ }
+```
+
 ### layerdb
 
 Within `/var/lib/docker/image/overlay2/layerdb/sha256/<CHAIN_ID>` there are several
@@ -314,6 +328,44 @@ docker images
 ```
 
 {% comment %}
+
+# imagedb/
+
+# |-- content
+
+# | `-- sha256
+
+# | |-- 56bd65ce5a1f2952072bccef939f24684213c004a51cee1ed1008ab98f7e5d45
+
+# | |-- 9c4b215836ff8897fcf9fb8885d78611945341ef584f17320ada70ea95718472
+
+# | `-- 9ed4aefc74f6792b5a804d1d146fe4b4a2299147b0f50eaf2b08435d7b38c27e
+
+# `-- metadata
+
+# `-- sha256
+
+# |-- 56bd65ce5a1f2952072bccef939f24684213c004a51cee1ed1008ab98f7e5d45
+
+# | `-- parent
+
+# `-- 9c4b215836ff8897fcf9fb8885d78611945341ef584f17320ada70ea95718472
+
+# |-- lastUpdated
+
+# `-- parent
+
+{
+"Repositories": {
+"alpine": {
+"alpine:3.17.3": "sha256:9ed4aefc74f6792b5a804d1d146fe4b4a2299147b0f50eaf2b08435d7b38c27e",
+"alpine@sha256:124c7d2707904eea7431fffe91522a01e5a861a624ee31d03372cc1d138a3126": "sha256:9ed4aefc74f6792b5a804d1d146fe4b4a2299147b0f50eaf2b08435d7b38c27e"
+},
+"myimage": {
+"myimage:latest": "sha256:9c4b215836ff8897fcf9fb8885d78611945341ef584f17320ada70ea95718472"
+}
+}
+}
 
 See https://shopify.github.io/liquid/tags/template/
 for liquid template engine docs.
