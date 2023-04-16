@@ -1,3 +1,9 @@
-# Micah's Blog
+# Micah's Blog Source
 
-[Exploring Docker's Database](dockerdb1/text.md)
+## Serving
+
+```
+nix-shell
+bundle install --gemfile=Gemfile --path vendor/cache
+bundle exec jekyll serve
+```
