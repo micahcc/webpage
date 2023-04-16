@@ -1,0 +1,338 @@
+---
+layout: post
+title: "Docker Database Part 1"
+date: 2023-04-15 19:07:33 -0700
+categories: docker nixos
+---
+
+# Exploring Docker's on disk layout
+
+## Background
+
+Docker doesn't really document the layout of `/var/lib/docker` and for most users
+this doesn't matter. However I have a particular problem: the docker load time is
+prohibitively high for nixos systemd units. The larger the image, the longer
+the load. This makes `nixos-rebuild switch` times that involve the container larger
+and in my particular case makes nixos tests using Qemu slow to start.
+
+Anyway, so if you are curious whats required to make /var/lib/docker
+contain pre-loaded images, on a fresh build (without ever having run dockerd),
+read on.
+
+## Test Image
+
+All the testing below will use the images built with
+
+```
+FROM alpine:3.17.3
+RUN touch /tmp1
+RUN touch /tmp2
+```
+
+This is a 3 layer docker image, which should exercise everything we'll see in a
+normal image. You can make the tar.gz we'll be testing with like so:
+
+```
+mkdir /tmp/ex
+echo '
+FROM alpine:3.17.3
+RUN touch /tmp1
+RUN touch /tmp2
+' > /tmp/ex/Dockerfile
+pushd /tmp/ex
+docker build -t ex .
+docker save ex -o image.tar.gz
+
+# now delete everything from dockerd
+docker system prune --all
+popd
+```
+
+## Docker Image Layout
+
+Unpacking the image.tar.gz will give us a directory tree like this:
+
+```
+.
+|-- 3c9da75acb8dbed5bf58172fa6654f002e864932b1014c74f9cd9ffb9150d68e
+|   |-- json
+|   |-- layer.tar
+|   `-- VERSION
+|-- 684790f8d59056842b3f0695b036b26e58f50849d9846ce9e6d3f3cd9a82e589
+|   |-- json
+|   |-- layer.tar
+|   `-- VERSION
+|-- d5d2a8ccad4852d39973f0b270e78ad303a64f59416422fa38d99d271b4723f6
+|   |-- json
+|   |-- layer.tar
+|   `-- VERSION
+|-- ff9a49797bde5ab234316d76dd67cca9f50655903ef133656c65a036ce3e3eaa.json
+|-- manifest.json
+`-- repositories
+```
+
+We don't need `repositories` or `VERSION`, so we'll ignore them.
+
+`manifest.json` contains (leaving out `Layers`, which we don't use):
+
+```
+[
+  {
+    "Config": "ff9a49797bde5ab234316d76dd67cca9f50655903ef133656c65a036ce3e3eaa.json",
+    "RepoTags": [
+      "ex:latest"
+    ],
+  }
+]
+```
+
+And each `json` file contains (leaving out `created`, `container_config`, `os`):
+
+```
+{
+  "id": "3c9da75acb8dbed5bf58172fa6654f002e864932b1014c74f9cd9ffb9150d68e",
+  "parent": "684790f8d59056842b3f0695b036b26e58f50849d9846ce9e6d3f3cd9a82e589",
+}
+```
+
+Finally the `layer.tar` files contain the actual directory tree diffs of each
+layer (e.g. `/bin/bash` is in there somewhere).
+
+So in summary, the files we care about are layed out:
+
+```
+.
+|-- <LAYER_ID>
+|   |-- json
+|   |-- layer.tar
+|-- <IMAGE_ID>.json
+|-- manifest.json (contains key "Config": "IMAGE_ID.json")
+```
+
+Where `LAYER_ID` and `IMAGE_ID` are sha256's of undefined data that doesn't
+really matter.
+
+## Overal Database Layout
+
+Once you load the data into docker it gets unpacked into `/var/lib/docker`.
+
+Loading back the image.tar.gz file we created tells us something about
+whats happening. Ignoring the massive
+number of files in
+`182a684029844ffa3eddde9d938c27ecbe8fd9768d13b3c7e37279e24a556c38`'s `diff`
+directory, we find the following additions to `/var/lib/docker`:
+
+```
+--- /tmp/before.txt	2023-04-15 13:02:55.423953308 -0700
++++ /tmp/after.txt	2023-04-15 13:02:43.859142051 -0700
+@@ -37,18 +37,578 @@
+ |       |-- imagedb
+ |       |   |-- content
+ |       |   |   |-- sha256
++|       |   |       |-- ff9a49797bde5ab234316d76dd67cca9f50655903ef133656c65a036ce3e3eaa
+ |       |   |-- metadata
+ |       |       |-- sha256
+ |       |-- layerdb
+ |       |   |-- mounts
+ |       |   |-- sha256
++|       |   |   |-- 09e6af46c585c93c580a288d64d9af11dd2cc98e8ed80a363c5be7cb7a4e0951
++|       |   |   |   |-- cache-id
++|       |   |   |   |-- diff
++|       |   |   |   |-- parent
++|       |   |   |   |-- size
++|       |   |   |   |-- tar-split.json.gz
++|       |   |   |-- bfb91cbdfd6d7e2d9cd7cd578a8e7cadf9993f384e005e62afe014af6ebfe82b
++|       |   |   |   |-- cache-id
++|       |   |   |   |-- diff
++|       |   |   |   |-- parent
++|       |   |   |   |-- size
++|       |   |   |   |-- tar-split.json.gz
++|       |   |   |-- f1417ff83b319fbdae6dd9cd6d8c9c88002dcd75ecf6ec201c8c6894681cf2b5
++|       |   |       |-- cache-id
++|       |   |       |-- diff
++|       |   |       |-- size
++|       |   |       |-- tar-split.json.gz
+ |       |   |-- tmp
+ |       |-- repositories.json
+ |-- network
+ |   |-- files
+ |       |-- local-kv.db
+ |-- overlay2
++|   |-- 182a684029844ffa3eddde9d938c27ecbe8fd9768d13b3c7e37279e24a556c38
++|   |   |-- committed
++|   |   |-- diff
++|   |   |   |-- <~500 files from the alpine root image>
++|   |   |-- link
++|   |-- c0df55e63a460f6793162ee25f5882aef60de0ba73a1e8a713bd18717324b37d
++|   |   |-- committed
++|   |   |-- diff
++|   |   |   |-- tmp1
++|   |   |-- link
++|   |   |-- lower
++|   |   |-- work
++|   |-- c8008ff14efad993d2b568e214b37c41bdb731087c4f36de0b5925c27af639f7
++|   |   |-- diff
++|   |   |   |-- tmp2
++|   |   |-- link
++|   |   |-- lower
++|   |   |-- work
+ |   |-- l
++|       |-- U7YKGGNAUD5NP6IVEERUHSCJVM -> ../182a684029844ffa3eddde9d938c27ecbe8fd9768d13b3c7e37279e24a556c38/diff
++|       |-- WFQKFDWGNXTT5JYQAXJRSLBV6Q -> ../c0df55e63a460f6793162ee25f5882aef60de0ba73a1e8a713bd18717324b37d/diff
++|       |-- YW5ULMZ3A6IO6B2OMECBSPYLZQ -> ../c8008ff14efad993d2b568e214b37c41bdb731087c4f36de0b5925c27af639f7/diff
+ |-- plugins
+ |   |-- storage
+ |   |   |-- ingest
+@@ -61,4 +621,4 @@
+     |-- backingFsBlockDev
+     |-- metadata.db
+
+-50 directories, 11 files
++166 directories, 455 files
+```
+
+Generalizing, the unpacked layout is of the form (again
+eliding all the directories that are unchanged):
+
+```
+/var/lib/docker/
+|-- image
+|   |-- overlay2
+|   |   |-- imagedb
+|   |   |   |-- content
+|   |   |   |   |-- sha256
+|   |   |   |       |-- <IMAGE_ID>
+|   |   |-- layerdb
+|   |       |-- mounts
+|   |       |-- sha256
+|   |           | <CHAIN_ID>
+|   |               |-- cache-id
+|   |               |-- diff
+|   |               |-- parent
+|   |               |-- size
+|   |               |-- tar-split.json.gz
+...
+|   |-- <CACHE_ID>
+|   |   |-- committed
+|   |   |-- diff
+|   |   |   |-- <Actual files from layer>
+|   |   |-- link
+...
+|   |-- l
+|       |-- <LINK_ID> -> ../<CACHE_ID>/diff
+
+```
+
+You'll note several variables here:
+
+1. `IMAGE_ID`: this is taken from the original image tar (`IMAGE_ID.json`),
+2. `LINK_ID`: is just a random A-Z0-9 unique ID.
+3. `CHAIN_ID`: `DIFF_ID` if the layer has no parent, otherwise
+   `sha256(f"{PARENT_CHAIN_ID} {DIFF_ID}")`
+4. `CACHE_ID`: is just a random sha256 signature (for the code we'll present this
+   is the sha256 of the `LINK_ID`.
+5. `DIFF_ID`: not shown above, but contained in a `diff` text file, is the sha256
+   of the originating `layer.tar` file that is unpacked to product the
+   `<CACHE_ID>/diff` directory.
+
+## Nitty Gritty
+
+Ok so what needs to be created to reproduce the contents of /var/lib/docker from
+an image? Let go through the files:
+
+### imagedb
+
+The original `<IMAGE_ID>.json` in the image tar needs to be copied to
+`/var/lib/docker/image/overlay2/imagedb/content/sha256/<IMAGE_ID>`
+
+### layerdb
+
+Within `/var/lib/docker/image/overlay2/layerdb/sha256/<CHAIN_ID>` there are several
+files:
+
+1. `cache-id` contains the randomly generated `CACHE_ID` for the layer
+2. `diff` contains the `"sha256:{DIFF_ID}"` for the layer (recall that this is the
+   sha256sum of the `layer.tar`)
+3. `parent` contains `"sha256:{CHAIN_ID}"` for the layer's parent layer
+4. `size` contains the size in bytes of the originating layer.tar file
+5. `tar-split.json.gz`: we don't need to implement, its a tool for perfectly
+   layer.tar so that `docker import && docker save` reproduces perfectly.
+
+### Layer
+
+Each stored layer has a directly in `/var/lib/docker/image/overlay2`, named `<CACHE_ID>`.
+Within this directory there are the following
+the actual data
+is stored, this contains
+
+1. `committed`: empty file
+2. `link`: a text file containing the layer `LINK_ID` (more about this in the `link`
+   section below
+3. `diff`: a directory containing the contents of `layer.tar`
+4. `lower`: a text file of the form
+   `l/6TZ45A4GZ4S57N5RJD5ZOSIMWY:l/TMYDVXFVOFFVSEUZSDYMZTJOLU`
+   This contains all the links to parent layers of the current layer, from most
+   recent to root. The first layer (which has no parent) does not have this file.
+   Every layer that uses the first layer will start with layer on the right. So
+   for example if your image `link_id`s are `AA` `BB` `CC` such that `AA`
+   is the parent of `BB` which is the parent of `CC`, then `AA` will have _no_
+   `lower` file,`BB`'s `lower` will contain `l/AA` and `CC`'s lower will contain
+   `l/BB:lAA`.
+
+### Links
+
+Within `/var/lib/docker/image/overlay2/l` each layer has a symlink named `<LINK_ID>`.
+Recall that `LINK_ID` is stored in layer's `link` file (see the above section).
+This symlink is a relative symlink to the layers `diff` directory. So, for example:
+So you have 3 layers with `LINK_ID`'s of `AA`, `BB`, `CC`, and `CACHE_ID`'s of
+`aaa`, `bbb`, `ccc`, then
+`/var/lib/docker/image/overlay2/l/` will contain 3 symlinks
+`AA -> ../aaa/diff`,
+`BB -> ../bbb/diff`,
+`CC -> ../ccc/diff`,
+
+## The Code
+
+Ok that was a lot of explanation, so now [here](explode_image.py) is the code.
+
+To test it, we can resume the bash work above.
+
+```
+# destroy docker state
+sudo mv /var/lib/docker/ /var/lib/docker.backup
+./explode_image.py -i image.tar.gz -o /tmp/docker
+sudo mv /tmp/docker /var/lib/docker
+sudo systemctl restart docker
+docker images
+```
+
+{% comment %}
+
+See https://shopify.github.io/liquid/tags/template/
+for liquid template engine docs.
+
+You’ll find this post in your `_posts` directory. Go ahead and edit it and re-build the site to see your changes. You can rebuild the site in many different ways, but the most common way is to run `jekyll serve`, which launches a web server and auto-regenerates your site when a file is updated.
+
+Jekyll requires blog post files to be named according to the following format:
+
+`YEAR-MONTH-DAY-title.MARKUP`
+
+Where `YEAR` is a four-digit number, `MONTH` and `DAY` are both two-digit numbers, and `MARKUP` is the file extension representing the format used in the file. After that, include the necessary front matter. Take a look at the source for this post to get an idea about how it works.
+
+Jekyll also offers powerful support for code snippets:
+
+{% highlight ruby %}
+def print_hi(name)
+puts "Hi, #{name}"
+end
+print_hi('Tom')
+#=> prints 'Hi, Tom' to STDOUT.
+{% endhighlight %}
+
+Check out the [Jekyll docs][jekyll-docs] for more info on how to get the most out of Jekyll. File all bugs/feature requests at [Jekyll’s GitHub repo][jekyll-gh]. If you have questions, you can ask them on [Jekyll Talk][jekyll-talk].
+
+[jekyll-docs]: https://jekyllrb.com/docs/home
+[jekyll-gh]: https://github.com/jekyll/jekyll
+[jekyll-talk]: https://talk.jekyllrb.com/
+
+{% comment %}
